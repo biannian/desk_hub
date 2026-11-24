@@ -1,0 +1,14 @@
+.venv/
+.uv-cache/
+data/
+preview-data/
+__pycache__/
+.pytest_cache/
+test-temp/
+preview.png
+build/
+*.spec
+*.log
+*.sqlite
+*.sqlite3
+access-token.txt

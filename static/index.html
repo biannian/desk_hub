@@ -1,0 +1,749 @@
+<!doctype html>
+<!-- Copyright (c) iGroup. All rights reserved.
+@author Kai @date 2026/10/23 15:51 @description 红米桌面看板，浏览器本地倒计时与授权 WebSocket。 -->
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#10151d">
+<title>Desk Hub · 桌面状态</title>
+<style>
+    /* Copyright (c) iGroup. All rights reserved.
+     * @author Kai @date 2026/10/23 16:26
+     * @description 手机横屏任务主屏：紧凑顶栏、活动任务舞台、底部考勤信息带。
+     */
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #0c1219; color: #eef5fc; }
+    * { box-sizing: border-box; } [hidden] { display: none !important; }
+    body { margin: 0; min-height: 100vh; padding: 14px 18px; background: radial-gradient(ellipse at 0 0, #23483c33, transparent 60%); }
+    button, input { font: inherit; color: inherit; background: #ffffff08; border: 1px solid #ffffff18; border-radius: 7px; padding: 6px 9px; }
+    button { cursor: pointer; } small, .muted { color: #91a3b8; }
+    header { display: flex; align-items: center; gap: 14px; height: 42px; margin-bottom: 12px; }
+    header > div:first-child { flex: 0 0 auto; } header small { font-size: 10px; letter-spacing: .15em; } h1 { display: none; }
+    #clock { margin-left: auto; font-size: 18px; font-variant-numeric: tabular-nums; color: #91a3b8; }
+    header button { font-size: 10px; } #logout { display: none; }
+    #agentOverview { font-size: 12px; font-weight: 650; color: #b0f0d4; }
+    main { display: flex; flex-direction: column; gap: 10px; }
+    main > section { order: 0; min-width: 0; } main > div { order: 1; }
+    main > section > .row { display: none; }
+    h2 { font-size: 10px; font-weight: 500; color: #91a3b8; margin: 0; }
+    #agents { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; align-content: start; align-items: start; }
+    .task { background: #18212d; border: 1px solid #ffffff12; border-radius: 12px; padding: 14px 18px 8px; min-width: 0; }
+    .task-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+    .task strong { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; font-size: 20px; line-height: 1.3; flex: 1; min-width: 0; }
+    .task p { font-size: 14px; line-height: 1.45; margin: 12px 0 0; color: #bfccdb; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .task p:last-child { font-size: 10px; color: #91a3b8; }
+    .task-status { flex: 0 0 auto; font-weight: 800; font-size: 22px; line-height: 1.15; padding: 9px 12px; border-radius: 7px; white-space: nowrap; }
+    .state-running { border-color: #8de7bd70; border-left: 6px solid #8de7bd; background: linear-gradient(110deg, #16473588, #15262a); }
+    .running { color: #082d20; background: #8de7bd; }
+    .state-waiting_user { border: 2px solid #ffce80; border-left-width: 6px; background: #49351d; } .waiting_user { color: #382100; background: #ffce80; }
+    .state-failed { border-color: #ff929a; border-left: 6px solid #ff929a; background: #42232c; } .failed { color: #3e0b13; background: #ff929a; }
+    .completed { color: #91baf0; background: #23364d; } .interrupted, .queued, .unknown { background: #354559; color: #edf3fc; }
+    /* 卡片按内容撑高，时间行后只留 8px，避免单任务最小高度制造大块留白。
+       @author Kai @date 2026/11/02 13:51 */
+    #agents > .task:only-child { padding: 14px 18px 8px; } #agents > .task:only-child strong { font-size: clamp(22px, 3.5vw, 34px); }
+    #agents > .task:only-child .task-status { font-size: clamp(24px, 3.5vw, 34px); }
+    #agents > .task:only-child p { font-size: 16px; } #agents > .task:only-child p:last-child { font-size: 11px; }
+    #history { margin-top: 10px; color: #75879a; font-size: 10px; } #history summary { cursor: pointer; padding: 5px 0; } #historyList { display: grid; gap: 8px; margin-top: 6px; }
+    #history .task strong { font-size: 14px; } #history .task-status { font-size: 12px; padding: 4px 7px; }
+    #adapters { display: none; }
+    main > div > section:first-child { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; border-top: 1px solid #ffffff12; padding: 10px 0 0; }
+    main > div > section + section { display: none; }
+    main > div .row { display: flex; align-items: center; gap: 8px; } #day { font-size: 9px; color: #7e91a6; }
+    #countdown { font-size: 18px; color: #b7d8c9; white-space: nowrap; } #attendanceState { font-size: 10px; color: #7e91a6; margin: 0; }
+    #workProgress { display: flex; align-items: center; gap: 8px; } .progressTrack { width: 65px; height: 4px; background: #ffffff12; border-radius: 5px; overflow: hidden; } #progressFill { height: 100%; background: #91d8bb; } #progressText { font-size: 9px; white-space: nowrap; }
+    /* 旧版手机浏览器不支持 :has，使用独立选择器隐藏考勤明细，保持简洁布局。
+       @author Kai @date 2026/10/30 11:30 */
+    #facts { display: none; }
+    .verified-detail { display: none; }
+    footer { display: flex; justify-content: space-between; font-size: 9px; color: #65788c; padding-top: 8px; } .online { color: #82bfa3; } .offline { color: #dfb293; }
+    #offline { position: fixed; bottom: 4px; left: 50%; transform: translateX(-50%); font-size: 10px; background: #48332a; padding: 4px 10px; border-radius: 6px; }
+    #login { margin-bottom: 10px; } #login p { font-size: 10px; }
+    @media (orientation: landscape) {
+        html { height: 100%; overflow: hidden; }
+        body { height: 100vh; height: 100dvh; min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding: max(8px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(5px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left)); }
+        header { flex: 0 0 32px; height: 32px; margin-bottom: 8px; }
+        main { flex: 1; min-height: 0; gap: 0; } main > section { flex: 1; min-height: 0; overflow: auto; scrollbar-width: thin; }
+        main > div { flex: 0 0 auto; } footer { flex: 0 0 auto; }
+        #agents { grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
+        #login { flex: 0 0 auto; } #login p { display: none; }
+    }
+    @media (max-height: 400px) and (orientation: landscape) { #agents > .task:only-child { padding: 12px 18px 8px; } .task p { margin-top: 8px; } }
+    /* @author Kai @date 2026/10/23 16:28：像素游戏视觉使用硬边、网格与高对比状态，不依赖外部字体或图片。 */
+    :root { background: #100e22; color: #f7f4ff; font-family: "Cascadia Mono", "Consolas", "Microsoft YaHei UI", monospace; }
+    body { background-color: #100e22; background-image: linear-gradient(#b19bff08 1px, transparent 1px), linear-gradient(90deg, #b19bff08 1px, transparent 1px); background-size: 18px 18px; }
+    header { border-bottom: 2px solid #514174; padding-bottom: 7px; }
+    header small { color: #e7adff; font-weight: 800; letter-spacing: .12em; }
+    header small::before { content: "◆ "; color: #ffdf69; }
+    #clock { color: #f5e7ff; font-weight: 700; text-shadow: 2px 2px #5d3680; }
+    button, input { border-radius: 0; border: 2px solid #8065a8; background: #251d3b; box-shadow: 2px 2px 0 #070610; }
+    button:hover { background: #4a3268; border-color: #d9b2ff; }
+    #agentOverview { color: #ffdf69; font-weight: 800; }
+    .task { border-radius: 0; border: 2px solid #71608f; box-shadow: 4px 4px 0 #05040c; background: #211a35; position: relative; }
+    .task strong { color: #fff; font-weight: 800; text-shadow: 2px 2px 0 #080912; }
+    .task p { color: #e3e7f8; } .task p:last-child { color: #b8b0d0; }
+    .task-status { border-radius: 0; border: 2px solid #ffffffbb; box-shadow: 3px 3px 0 #080812; letter-spacing: .08em; }
+    .state-running { border: 2px solid #42e8ff; border-left: 8px solid #42e8ff; background: linear-gradient(110deg, #073c53, #172443); }
+    .running { background: #42e8ff; color: #002e43; }
+    .state-running .task-status::before { content: "▶ "; }
+    .state-waiting_user { border: 2px solid #ffe04d; border-left: 8px solid #ffe04d; background: linear-gradient(110deg, #594509, #342718); }
+    .waiting_user { background: #ffe04d; color: #3c2800; }
+    .state-waiting_user .task-status::before { content: "! "; }
+    .state-failed { border: 2px solid #ff657c; border-left: 8px solid #ff657c; background: linear-gradient(110deg, #631b35, #321b36); }
+    .failed { background: #ff657c; color: #410818; }
+    .state-failed .task-status::before { content: "× "; }
+    .state-completed { border: 2px solid #b68bff; border-left: 8px solid #b68bff; background: #2e2047; }
+    .completed { background: #b68bff; color: #281043; }
+    .state-completed .task-status::before { content: "✓ "; }
+    .interrupted, .queued, .unknown { background: #75809d; color: #11182c; }
+    #history { color: #a392c0; } #history summary::marker { color: #b68bff; }
+    main > div > section:first-child { border-top: 2px solid #514174; }
+    #countdown { color: #a9ff81; font-weight: 700; } #attendanceState { color: #b7b0cb; }
+    .progressTrack { border-radius: 0; height: 7px; background: #080712; border: 1px solid #74628b; }
+    #progressFill { border-radius: 0; background: #a9ff81; background-image: repeating-linear-gradient(90deg, transparent 0 7px, #0e1328 7px 9px); }
+    .online { color: #a9ff81; } .offline { color: #ff9d72; }
+    #offline { border-radius: 0; border: 2px solid #ff9d72; background: #462332; color: #ffe7bd; }
+    /* @author Kai @date 2026/10/23 16:30：常驻触屏不选中文字；输入框仍可选择和编辑令牌。 */
+    body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+    input, textarea { -webkit-user-select: text; user-select: text; }
+    .task .session-label, #agents > .task:only-child .session-label { font-size: 12px; color: #aab5d0; margin-top: 12px; }
+    .task strong { -webkit-line-clamp: 3; }
+    #agents > .task:only-child strong { font-size: clamp(20px, 3vw, 30px); }
+    /* 像素光点代表正在运行，不代表真实完成比例；禁用动效偏好下静态呈现。 */
+    .state-running { overflow: hidden; animation: running-glow 3s ease-in-out infinite; }
+    .state-running::after { content: ""; position: absolute; bottom: 0; left: 0; width: 32px; height: 4px; background: #a5f6ff; box-shadow: -12px 0 #42e8ff80, -24px 0 #42e8ff30; animation: pixel-run 4s linear infinite; pointer-events: none; }
+    .state-running .task-status::before { display: inline-block; animation: pixel-step 1.4s steps(2, end) infinite; }
+    .state-waiting_user .task-status { animation: waiting-glow 2.8s ease-in-out infinite; }
+    @keyframes pixel-run { from { left: -32px; } to { left: 100%; } }
+    @keyframes pixel-step { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(3px); } }
+    @keyframes running-glow { 0%, 100% { box-shadow: 4px 4px #05040c; } 50% { box-shadow: 4px 4px #05040c, 0 0 12px #42e8ff28; } }
+    @keyframes waiting-glow { 0%, 100% { box-shadow: 3px 3px #080812; } 50% { box-shadow: 3px 3px #080812, 0 0 12px #ffe04d60; } }
+    @media (prefers-reduced-motion: reduce) { .state-running, .state-running::after, .state-running .task-status::before, .state-waiting_user .task-status { animation: none; } }
+    /* @author Kai @date 2026/10/23 16:34：完成未读优先于运行态，作为返回原工具检查结果的提示。 */
+    .task.needs-review { border: 3px solid #e6a1ff; border-left: 8px solid #e6a1ff; background: linear-gradient(110deg, #4c2464, #261837); box-shadow: 4px 4px #080410; animation: result-ready 2.8s ease-in-out infinite; }
+    .needs-review .task-status { background: #edb1ff; color: #351047; }
+    .review-action { margin-top: 14px; padding: 8px 16px; border-color: #edb1ff; color: #f5d7ff; font-weight: 750; }
+    .state-running { animation: none; border-color: #248ba7; border-left-color: #42b4cf; background: #132b3b; }
+    .state-running .task-status { font-size: 20px; background: #309ab4; color: #071f2d; }
+    @keyframes result-ready { 0%, 100% { box-shadow: 4px 4px #080410; } 50% { box-shadow: 4px 4px #080410, 0 0 18px #d98aff60; } }
+    @media (prefers-reduced-motion: reduce) { .task.needs-review { animation: none; } }
+    /* @author Kai @date 2026/10/23 16:41：完成卡片整块可轻点收起，状态标签保持短小。 */
+    .tap-review { cursor: pointer; touch-action: manipulation; }
+    .tap-review:active { filter: brightness(1.15); }
+    .tap-review:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+    .needs-review .task-status { font-size: 20px; padding: 7px 10px; }
+    #agents > .needs-review:only-child .task-status { font-size: 24px; }
+    /* @author Kai @date 2026/10/23 16:43：在线不展示同步文案，断线仍使用底部提示。 */
+    footer { display: none; }
+    /* @author Kai @date 2026/10/23 16:44：状态标签仅供辅助阅读，屏幕以边框颜色和动效表达状态，释放正文宽度。 */
+    .task .task-status, #agents > .task:only-child .task-status { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; box-shadow: none; animation: none; }
+    .task-heading { display: block; }
+    .state-waiting_user { animation: waiting-glow 2.8s ease-in-out infinite; }
+    @media (prefers-reduced-motion: reduce) { .state-waiting_user { animation: none; } }
+/* OLED 独立场景完全遮盖固定网格与文字。@author Kai @date 2026/10/30 10:59 */
+#oledScene { position:fixed; inset:0; width:100vw; height:100vh; height:100dvh; background:#000; z-index:9999; touch-action:manipulation; }
+#oledScene[hidden] { display:none; }
+/* 先完成淡出再隐藏画布，旧手机也能平滑切换。@author Kai @date 2026/10/30 11:29 */
+#oledScene { opacity:0; transform:scale(1.035); transition:opacity 650ms ease, transform 900ms ease; pointer-events:none; }
+#oledScene.scene-visible { opacity:1; transform:scale(1); pointer-events:auto; }
+body > header, body > main, body > footer { transition:opacity 650ms ease, transform 650ms ease; }
+body.scene-active > header, body.scene-active > main, body.scene-active > footer { opacity:0; transform:translateY(12px); pointer-events:none; }
+@media (prefers-reduced-motion: reduce) { #oledScene, body > header, body > main, body > footer { transition:none; transform:none; } }
+/* 任务额度并入底部状态栏，窄屏允许换行，保留任务卡片空间。
+   @author Kai @date 2026/11/02 13:48 */
+#taskQuota { display:flex; align-items:stretch; flex-wrap:wrap; gap:8px; padding:0; font-size:13px; color:#a9ced8; }
+#taskQuota span { white-space:nowrap; }
+/* 各服务独立成组，窗口名称和重置倒计时跟随服务数据。
+   @author Kai @date 2026/11/02 13:52 */
+/* Codex 与 Cursor 同屏并排，各自一块，不再挤成一行轮换。
+   @author Kai @date 2026/11/20 09:32 */
+#taskQuota .quota-provider { display:flex; align-items:center; flex-wrap:wrap; gap:6px 14px; padding:6px 10px; border:2px solid #514174; background:#1c1633; box-shadow:3px 3px 0 #05040c; }
+#taskQuota .quota-provider[data-provider="codex"] { border-color:#2f6f78; }
+#taskQuota .quota-provider[data-provider="cursor"] { border-color:#6d5a93; }
+#taskQuota .quota-window { display:flex; flex-direction:column; gap:3px; padding-left:12px; border-left:1px solid #514174; }
+#taskQuota .quota-main { font-size:14px; font-weight:600; line-height:1.2; }
+#taskQuota .quota-reset { font-size:11px; font-weight:400; color:#929caf; line-height:1.2; }
+#taskQuota .quota-name { color:#c0b3e0; font-weight:600; }
+#taskQuota .quota-window { color:#a9ced8; }
+#taskQuota .quota-window.quota-low { color:#f0b18c; }
+#taskQuota .quota-low { color:#f0b18c; }
+#quotaUpdated { display:none; }
+footer { align-items:center; flex-wrap:wrap; gap:4px 12px; border-top:1px solid #514174; padding-top:6px; }
+/* 额度左置、考勤右置；窄屏换行后考勤仍靠右，不依赖已隐藏的 footer。
+   @author Kai @date 2026/11/02 13:50 */
+#attendanceSummary { margin-left:auto; display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:8px 12px; min-width:0; }
+#taskQuota { flex:0 1 auto; }
+main > div > section:first-child { justify-content:space-between; }
+body.scene-active #taskQuota { opacity:0; pointer-events:none; }
+#taskQuota { transition:opacity 650ms ease; }
+@media (prefers-reduced-motion: reduce) { #taskQuota { transition:none; } }
+/* 断线只显示低对比小字，不遮挡任务与屏保。@author Kai @date 2026/11/03 08:48 */
+#offline { left:auto; right:12px; bottom:5px; transform:none; padding:0; border:0; background:transparent; color:#718096; font-size:10px; pointer-events:none; }
+</style>
+<header>
+    <div><small>DESK / LIVE</small><h1>Agent 工作台</h1></div>
+    <span id="agentOverview" class="pill">等待任务</span><div id="clock"></div>
+    <!-- @author Kai @date 2026/10/23 16:29：手机直接使用可视高度布局，移除无效全屏按钮与顶栏占位。 -->
+    <button id="logout" hidden>重新连接</button>
+</header>
+<!-- 额度为服务报告的剩余百分比，与屏保使用相同快照。@author Kai @date 2026/11/02 13:47 -->
+<div id="login"><input id="token" type="password" placeholder="输入 Windows 端访问令牌" autocomplete="off"> <button id="connect">连接看板</button><p class="muted">令牌仅保存于本机浏览器，不放入访问链接。</p></div>
+<div id="offline" hidden>离线 · 显示缓存</div>
+<main class="grid">
+    <div><section><div id="taskQuota" aria-label="AI 额度余量"><span>Codex · 暂无额度数据</span></div><div id="attendanceSummary"><div class="row"><h2>今日考勤</h2><span id="day" class="pill">状态未知</span></div><div id="countdown">等待连接</div><p id="attendanceState" class="muted"></p><div id="workProgress" hidden><div class="progressTrack"><div id="progressFill"></div></div><small id="progressText"></small></div><div id="facts" class="facts"></div><p class="verified-detail"><small id="verified"></small></p></div></section><section><h2>待你处理</h2><div id="attention" class="muted">暂无提醒</div></section></div>
+    <section><div class="row"><h2>开发动态</h2></div><div id="agents"></div><details id="history"><summary id="historyLabel">已结束任务</summary><div id="historyList"></div></details><div id="adapters" class="muted"></div></section>
+</main>
+<footer><span id="connection">未连接</span><span id="synced">尚未同步</span></footer>
+<canvas id="oledScene" hidden aria-label="Token 用量屏保，轻点查看任务监控"></canvas>
+<script>
+    /** 看板客户端模块。@author Kai @date 2026/10/23 15:51 @description 只由本地时钟驱动秒级显示，状态通过推送更新。 */
+    // @author Kai @date 2026/10/23 16:34：新完成任务持续提醒到用户确认，不重复弹出历史完成记录。
+    const noticeSince = Number(localStorage.getItem("desk-hub-notice-since")) || Date.now();
+    localStorage.setItem("desk-hub-notice-since", String(noticeSince));
+    let viewed = new Set();
+    try { viewed = new Set(JSON.parse(localStorage.getItem("desk-hub-viewed") || "[]")); } catch (_) { /* 无效记录重新确认。 */ }
+    const noticeKey = (task) => task.tool + ":" + task.task_id + ":" + task.occurred_at;
+    const needsReview = (task) => task.state === "completed" && !task.viewed && new Date(task.occurred_at).getTime() >= noticeSince && !viewed.has(noticeKey(task));
+    const labels = {queued: "等待执行", running: "执行中", waiting_user: "等待确认", completed: "完成", failed: "失败", interrupted: "已中断", unknown: "未知"};
+    // 连接和缓存状态只保存在本设备；任务权威数据保存在 Windows SQLite。
+    let token = localStorage.getItem("desk-hub-token") || "";
+    let data = null, socket = null, online = false, lastMessage = 0, retry = null;
+    try { data = JSON.parse(localStorage.getItem("desk-hub-last") || "null"); } catch (_) { /* 损坏缓存等待服务器重新同步。 */ }
+    const el = (id) => document.getElementById(id);
+    /** 安全写入文本，事件摘要不得作为 HTML 执行。@param id 元素标识 @param text 内容 @author Kai @date 2026/10/23 15:51 */
+    function text(id, text) { el(id).textContent = text || ""; }
+    /** 格式化真实时间。@param value ISO 时间 @return 展示字符串 @author Kai @date 2026/10/23 15:51 */
+    function time(value) { return value ? new Date(value).toLocaleTimeString("zh-CN", {hour: "2-digit", minute: "2-digit", timeZone: "Asia/Shanghai"}) : "--"; }
+    /** 格式化核验时间，统一按中国时区展示。@param value 导出更新时间 @return 今天时刻或完整日期时刻 @author Kai @date 2026/10/23 16:15 */
+    function verifiedTime(value) {
+        if (!value) return "尚无记录";
+        // 原助手写出不带时区的本地时间，明确作为中国时间解析。
+        const normalized = /(?:Z|[+-]\d{2}:?\d{2})$/.test(value) ? value : value + "+08:00";
+        const date = new Date(normalized);
+        if (Number.isNaN(date.getTime())) return "时间未知";
+        const options = {timeZone: "Asia/Shanghai"};
+        const today = date.toLocaleDateString("sv-SE", options) === new Date().toLocaleDateString("sv-SE", options);
+        const clock = date.toLocaleTimeString("zh-CN", {...options, hour12: false});
+        return (today ? "今天 " : date.toLocaleDateString("zh-CN", options) + " ") + clock;
+    }
+    /** 更新离线标识并保留过期内容。@param value 在线状态 @author Kai @date 2026/10/23 15:51 */
+    function connection(value) {
+        online = value; el("offline").hidden = value || !data;
+        text("connection", value ? "● 实时同步" : "● 等待重连");
+        el("connection").className = value ? "online" : "offline";
+        tick();
+    }
+    /** 去掉 Cursor 日志包在请求外的时间戳和查询标签。
+     * @param text 原始摘要 @return 可见请求 @author Kai @date 2026/11/20 09:40 */
+    function visibleRequest(text) {
+        let value = String(text || "");
+        value = value.replace(/<timestamp\b[^>]*>[\s\S]*?<\/timestamp>/gi, " ");
+        const wrapped = value.match(/<user_query\b[^>]*>([\s\S]*?)<\/user_query>/i);
+        if (wrapped) value = wrapped[1];
+        else value = value.replace(/<\/?user_query\b[^>]*>/gi, " ");
+        return value.replace(/\s+/g, " ").trim();
+    }
+    /** 绘制任务卡片。@param task 统一任务 @return DOM 元素 @author Kai @date 2026/10/23 15:51 */
+    function taskCard(task) {
+        const card = document.createElement("div"); card.className = "task state-" + task.state;
+        // @author Kai @date 2026/10/23 16:30：本轮输入优先，会话标题仅作为辅助定位。
+        const title = document.createElement("strong"); title.textContent = visibleRequest(task.request_excerpt) || task.title;
+        const state = document.createElement("span"); state.className = "pill task-status " + task.state; state.textContent = labels[task.state] || "未知";
+        if (needsReview(task)) {
+            card.classList.add("needs-review");
+            state.textContent = "完成";
+        }
+        card.title = `${task.source} · ${task.confidence}`;
+        // @author Kai @date 2026/10/23 16:24：状态固定在卡片标题右侧，以大标签提升远距离可读性。
+        const heading = document.createElement("div"); heading.className = "task-heading"; heading.append(title, state); card.append(heading);
+        if (task.request_excerpt) { const session = document.createElement("p"); session.className = "session-label"; session.textContent = task.title.length > 40 ? task.title.slice(0, 40) + "…" : task.title; card.append(session); }
+        for (const message of [task.reason, task.activity_text || (task.request_excerpt ? "" : task.summary), `${task.tool} · ${time(task.activity_at || task.occurred_at)}`]) {
+            if (message) { const p = document.createElement("p"); p.textContent = message; p.className = "excerpt"; card.append(p); }
+        }
+        if (needsReview(task)) {
+            // @author Kai @date 2026/10/23 16:41：轻点完成卡片确认，免去额外按钮占位；键盘仍可操作。
+            card.classList.add("tap-review"); card.tabIndex = 0; card.setAttribute("role", "button"); card.setAttribute("aria-label", "完成，点击收起");
+            let saving = false;
+            card.onclick = async () => {
+                if (saving) return;
+                saving = true;
+                try {
+                    const response = await fetch("/api/agents/review", {method: "POST", headers: {Authorization: "Bearer " + token, "Content-Type": "application/json"}, body: JSON.stringify({event_id: task.event_id})});
+                    if (!response.ok || !(await response.json()).reviewed) throw new Error("确认未保存");
+                    task.viewed = true; viewed.add(noticeKey(task)); localStorage.setItem("desk-hub-viewed", JSON.stringify([...viewed])); render(data);
+                } catch (_) { saving = false; state.textContent = "重试"; }
+            };
+            card.onkeydown = (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); card.click(); } };
+        }
+        return card;
+    }
+    /** 绘制服务器快照。@param snapshot 最新快照 @author Kai @date 2026/10/23 15:51 */
+    function render(snapshot) {
+        data = snapshot; localStorage.setItem("desk-hub-last", JSON.stringify(data));
+        // 每个会话只展示最近一轮，避免历史轮次占满独立屏幕。
+        const sessions = new Map();
+        for (const task of data.agents) { if (task.title === "Guardian review") continue; const key = task.tool + ":" + task.task_id.split(":")[0]; if (!sessions.has(key)) sessions.set(key, task); }
+        const visible = [...sessions.values()].sort((a, b) => ({waiting_user: 0, running: 1, failed: 2}[a.state] ?? 3) - ({waiting_user: 0, running: 1, failed: 2}[b.state] ?? 3));
+        const completedNotices = data.agents.filter((task) => task.title !== "Guardian review" && needsReview(task));
+        const active = visible.filter((task) => !["completed", "interrupted"].includes(task.state));
+        const ended = visible.filter((task) => ["completed", "interrupted"].includes(task.state) && !task.viewed && !viewed.has(noticeKey(task)));
+        text("agentOverview", completedNotices.length ? `${completedNotices.length} 项完成` : active.length ? `${active.filter((task) => task.state === "running").length} 执行中 · ${active.filter((task) => task.state === "waiting_user").length} 待确认` : "本轮任务已结束");
+        el("agents").replaceChildren(...completedNotices.map(taskCard), ...active.map(taskCard));
+        el("historyList").replaceChildren(...ended.map(taskCard));
+        text("historyLabel", `已结束 ${ended.length} 项 · 展开查看`);
+        el("history").hidden = ended.length === 0;
+        if (!active.length && !completedNotices.length) text("agents", "当前没有进行中的任务");
+        const notices = data.agents.filter((task) => ["waiting_user", "failed"].includes(task.state));
+        el("attention").replaceChildren(...notices.slice(0, 8).map(taskCard));
+        if (!notices.length) text("attention", "一切就绪");
+        text("adapters", Object.entries(data.adapters).map(([tool, state]) => tool + "：" + state).join(" / "));
+        text("synced", "同步于 " + time(data.server_time)); tick();
+    }
+    /** 每秒本地重算，离线或过期时停止呈现实时倒计时。@author Kai @date 2026/10/23 15:51 */
+    function tick() {
+        updateOled();
+        updateTaskQuota();
+        text("clock", new Date().toLocaleTimeString("zh-CN", {hour12: false, timeZone: "Asia/Shanghai"}));
+        if (!data) return;
+        const a = data.attendance;
+        el("workProgress").hidden = true;
+        text("day", a.workday === null ? "工作日未知" : a.workday ? "工作日" : "休息日");
+        el("facts").replaceChildren(); text("verified", "最近核验 " + verifiedTime(a.updated_at));
+        text("attendanceState", "");
+        // @author Kai @date 2026/10/23 16:05：离线保留最后同步时刻的画面，仅以小字提示，停止实时外推。
+        el("countdown").style.opacity = online ? "1" : ".55";
+        if (a.workday === false) { text("countdown", "今天休息"); return; }
+        if (!a.ok) { text("countdown", "数据暂不可用"); return; }
+        for (const [label, value] of [["上班", a.in_time], ["可走", a.target_time], ["下班卡", a.latest_out]]) {
+            const item = document.createElement("div"); item.textContent = label;
+            const valueNode = document.createElement("b"); valueNode.textContent = time(value); item.append(valueNode); el("facts").append(item);
+        }
+        if (!a.in_time || !a.target_time) { text("countdown", "未查到上班卡"); return; }
+        // @author Kai @date 2026/10/23 16:01：沿用电脑端 live_tick_summary，当日始终按当前时间倒计时，下班卡仅作详情。
+        const seconds = Math.ceil((new Date(a.target_time) - (online ? Date.now() : new Date(data.server_time).getTime())) / 1000);
+        if (seconds <= 0) { text("countdown", "可以下班了"); text("attendanceState", a.latest_out ? "已满应出勤 · 已有下班卡" : "已满应出勤 · 记得打下班卡"); return; }
+        // @author Kai @date 2026/10/23 16:18：对应电脑端 display_strategy 与 detail_popup 的展示条件。
+        const config = a.display || {};
+        const mode = ["quiet", "near", "always"].includes(config.display_mode) ? config.display_mode : "near";
+        const threshold = Math.max(1, Number(config.near_minutes) || 20);
+        const near = seconds <= threshold * 60;
+        const show = mode === "always" || near;
+        const required = new Date(a.target_time) - new Date(a.in_time);
+        const progress = Math.max(0, Math.min(1, 1 - seconds * 1000 / required));
+        if (show && mode !== "quiet") {
+            text("countdown", "可走 " + time(a.target_time));
+            text("attendanceState", `还差 ${Math.ceil(seconds / 60)} 分钟`);
+            el("workProgress").hidden = false;
+            el("progressFill").style.width = `${progress * 100}%`;
+            el("progressFill").style.background = near ? "#f5b66f" : "#a3e7ce";
+            text("progressText", `已完成 ${Math.round(progress * 100)}%`);
+        } else {
+            const far = config.far_display || "clock_in";
+            text("countdown", mode === "quiet" ? "今日考勤" : far === "clock_in" ? "上班 " + time(a.in_time) : far === "full" ? "可走 " + time(a.target_time) : far === "today_normal" ? "今日已打卡" : "今日考勤");
+            text("attendanceState", "可走 " + time(a.target_time));
+        }
+    }
+    // 连接代次使旧连接与旧请求无法覆盖新快照；每次恢复先取 HTTP 权威数据。
+    // @author Kai @date 2026/11/03 13:56
+    let connectVersion = 0, lastConnectAttempt = 0;
+    /** 重建连接并立即拉取快照，兼容手机休眠后半关闭的 WebSocket。
+     * @author Kai @date 2026/11/03 13:56 */
+    async function connect() {
+        clearTimeout(retry); if (!token) return;
+        const version = ++connectVersion;
+        lastConnectAttempt = Date.now();
+        if (socket) { socket.onclose = null; socket.onmessage = null; socket.onerror = null; socket.onopen = null; socket.close(); socket = null; }
+        el("login").hidden = true;
+        const controller = typeof AbortController === "function" ? new AbortController() : null;
+        const timeout = setTimeout(() => { if (controller) controller.abort(); }, 8000);
+        try {
+            const response = await fetch("/api/dashboard", {cache: "no-store", headers: {Authorization: "Bearer " + token}, signal: controller ? controller.signal : undefined});
+            if (version !== connectVersion) return;
+            if (response.status === 401) { el("login").hidden = false; connection(false); text("connection", "令牌无效，请重新连接"); return; }
+            if (!response.ok) throw new Error("服务不可用");
+            const snapshot = await response.json();
+            if (version !== connectVersion) return;
+            render(snapshot); lastMessage = Date.now(); connection(true);
+            const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
+            socket = ws;
+            ws.onopen = () => { if (version === connectVersion) ws.send(JSON.stringify({token})); };
+            ws.onmessage = (event) => {
+                if (version !== connectVersion) return;
+                const message = JSON.parse(event.data); lastMessage = Date.now(); connection(true);
+                if (message.type === "snapshot") render(message.data);
+            };
+            ws.onclose = () => { if (version === connectVersion) { connection(false); retry = setTimeout(connect, 4000); } };
+            ws.onerror = () => ws.close();
+        } catch (_) {
+            if (version === connectVersion) { connection(false); retry = setTimeout(connect, 4000); }
+        } finally { clearTimeout(timeout); }
+    }
+    /** 手机回到前台或网络恢复时直接重新拉取，不等待旧连接主动关闭。
+     * @author Kai @date 2026/11/03 13:56 */
+    function resumeDashboard() {
+        if (token && !document.hidden) connect();
+    }
+    document.addEventListener("visibilitychange", resumeDashboard);
+    window.addEventListener("pageshow", resumeDashboard);
+    window.addEventListener("online", resumeDashboard);
+
+    // 独立低亮度场景：28 个粒子、两个星球及持续换位的机器人。
+    // @author Kai @date 2026/10/30 10:59
+    const oled = el("oledScene"), brush = oled.getContext("2d");
+    /** 用户轻点后临时查看监控一分钟。@author Kai @date 2026/10/30 10:59 */
+    let inspectUntil = 0;
+    // 重要事件只唤醒一分钟，避免历史失败和未读完成永久阻挡屏保。
+    // @author Kai @date 2026/10/30 11:21
+    let alertUntil = 0;
+    const alertedEvents = new Set();
+    // 首次快照只为历史结果建立基线，新状态按接收时间唤醒，不依赖手机时钟。
+    let eventsInitialized = false;
+    let sceneActive = false, sceneHideTimer = null;
+    /** 平滑进入或退出保护场景，中途反向切换时取消旧隐藏任务。
+     * @param visible 是否显示保护场景 @author Kai @date 2026/10/30 11:29 */
+    function switchScene(visible) {
+        if (visible === sceneActive) return;
+        sceneActive = visible;
+        clearTimeout(sceneHideTimer);
+        document.body.classList.toggle("scene-active", visible);
+        if (visible) {
+            oled.hidden = false;
+            // 强制提交初始透明帧，确保 display:none 恢复后仍有入场动画。
+            void oled.offsetWidth;
+            oled.classList.add("scene-visible");
+        } else {
+            oled.classList.remove("scene-visible");
+            sceneHideTimer = setTimeout(() => { if (!sceneActive) oled.hidden = true; }, 950);
+        }
+    }
+    oled.onclick = () => { inspectUntil = Date.now() + 60000; updateOled(); };
+    /** 根据重要事件与工作时间选择屏保或黑屏。@author Kai @date 2026/10/30 10:59 */
+    function updateOled() {
+        const a = data?.attendance;
+        const enabled = a?.display?.desk_hub_oled === true;
+        // 下班或休息日的快照跨日后继续保持全黑，避免关机断线时午夜重新显示旧屏保。
+        // 服务恢复后由新考勤快照重新判断；手机日期变化不能代替当天考勤数据。
+        // @author Kai @date 2026/11/06 16:05
+        const quiet = a?.workday === false || !!(a?.ok && a.target_time && Date.now() >= Date.parse(a.target_time));
+        // 与监控页一致，每个会话只取最新轮次；旧轮次不再阻挡机器人。
+        const latest = new Map();
+        for (const task of (data?.agents || [])) {
+            if (task.title === "Guardian review") continue;
+            const key = task.tool + ":" + task.task_id.split(":")[0];
+            if (!latest.has(key)) latest.set(key, task);
+        }
+        for (const task of latest.values()) {
+            const key = noticeKey(task) + ":" + task.state;
+            const important = needsReview(task) || ["waiting_user", "failed"].includes(task.state);
+            if (online && important && !alertedEvents.has(key)) {
+                alertedEvents.add(key);
+                if (eventsInitialized) alertUntil = Date.now() + 60000;
+            }
+        }
+        if (online) eventsInitialized = true;
+        // 正在执行或等待用户的任务持续展示监控；休息/下班黑屏也不能覆盖重要事件。
+        const active = [...latest.values()].some(task => ["queued", "running", "waiting_user"].includes(task.state));
+        const important = online && (Date.now() < alertUntil || active);
+        switchScene(enabled && !!token && Date.now() >= inspectUntil && !important);
+        oled.dataset.quiet = quiet ? "yes" : "no";
+    }
+    /** 格式化服务报告的窗口重置倒计时，不推断下一个周期额度。
+     * @param resetsAt Unix 重置时间，秒 @return 重置时间说明
+     * @author Kai @date 2026/11/02 13:52 */
+    function quotaCountdown(resetsAt) {
+        if (typeof resetsAt !== "number" || !Number.isFinite(resetsAt)) return "--:--";
+        const seconds = Math.ceil(resetsAt - Date.now() / 1000);
+        if (seconds <= 0) return "等待更新";
+        // 仅显示到分钟的剩余时长，省去“约”和“后重置”等重复文字。
+        // @author Kai @date 2026/11/02 13:57
+        const totalMinutes = Math.ceil(seconds / 60);
+        const days = Math.floor(totalMinutes / 1440);
+        const hours = Math.floor(totalMinutes % 1440 / 60);
+        const minutes = totalMinutes % 60;
+        return (days ? days + "天 " : "") + String(hours).padStart(2, "0") + ":" + String(minutes).padStart(2, "0");
+    }
+    /** 格式化不同 AI 的额度窗口名称。
+     * @param item 来源额度窗口 @return 窗口名称 @author Kai @date 2026/11/02 13:52 */
+    function quotaWindowName(item) {
+        // 来源名称已经写在前面，通用的「套餐额度」不再重复。
+        // @author Kai @date 2026/11/20 09:34
+        if (item.label === "套餐额度") return "";
+        if (item.label) return item.label;
+        if (item.minutes === 10080) return "周额度";
+        if (item.minutes === 1440) return "日额度";
+        return item.minutes ? (item.minutes >= 60 ? item.minutes / 60 + "h" : item.minutes + "分钟") : "额度";
+    }
+    /** 更新任务页各 AI 的额度摘要，闲置保留旧记录，周期结束不展示旧余量。
+     * @author Kai @date 2026/11/02 13:52 */
+    function updateTaskQuota() {
+        // 兼容现有预览服务的单来源快照；服务升级后使用来源数组。
+        const sources = data && Array.isArray(data.usages) ? data.usages : [data && data.usage || {}];
+        if (!sources.length) {
+            const empty = document.createElement("span");
+            empty.textContent = "未选择要监听的 AI";
+            el("taskQuota").replaceChildren(empty);
+            return;
+        }
+        const groups = sources.map(source => {
+            const group = document.createElement("div"); group.className = "quota-provider";
+            group.dataset.provider = source.provider_id || "";
+            const name = document.createElement("span"); name.className = "quota-name";
+            const stamp = Date.parse(source.limits_updated_at || source.updated_at);
+            const age = Number.isFinite(stamp) ? Math.max(0, Math.floor((Date.now() - stamp) / 60000)) : null;
+            name.textContent = source.provider_name || "Codex";
+            name.setAttribute("aria-label", name.textContent + (age !== null && age >= 15 ? "，上次记录" : "") + "，剩余额度");
+            group.title = (age === null ? "暂无用量记录" : age < 1 ? "刚刚更新" : age + " 分钟前更新") + (!online ? " · 离线快照" : "");
+            group.append(name);
+            const limits = Array.isArray(source.limits) ? source.limits : [];
+            if (!limits.length) { const empty = document.createElement("span"); empty.textContent = "暂无额度数据"; group.append(empty); }
+            for (const item of limits) {
+                const node = document.createElement("span"); node.className = "quota-window";
+                const reset = typeof item.resets_at === "number" && Date.now() >= item.resets_at * 1000;
+                const valid = typeof item.remaining_percent === "number" && Number.isFinite(item.remaining_percent);
+                const value = valid ? item.remaining_percent.toFixed(0) + "%" : "—";
+                const windowName = source.provider_id === "cursor" && (!item.label || item.label === "套餐额度") ? "" : quotaWindowName(item);
+                const main = document.createElement("span"); main.className = "quota-main";
+                main.textContent = windowName ? windowName + "  " + value : value;
+                const resetLabel = document.createElement("span"); resetLabel.className = "quota-reset";
+                resetLabel.textContent = reset ? "上周期 · 待同步" : !valid ? "暂无数据" : quotaCountdown(item.resets_at);
+                node.append(main, resetLabel);
+                node.title = (windowName ? windowName + " " : "") + "剩余 " + value + " · 距重置 " + quotaCountdown(item.resets_at) + " · " + group.title;
+                resetLabel.setAttribute("aria-label", "距重置 " + resetLabel.textContent);
+                node.classList.toggle("quota-low", !!(valid && !reset && item.remaining_percent < 20));
+                group.append(node);
+            }
+            return group;
+        });
+        el("taskQuota").replaceChildren(...groups);
+    }
+    /** 格式化日志实际 token 计数，缺失保留未知。
+     * @param value token 数量 @return 紧凑计数 @author Kai @date 2026/11/02 09:54 */
+    function usageNumber(value) {
+        if (typeof value !== "number") return "—";
+        return value >= 1000000 ? (value / 1000000).toFixed(2) + "M" : value >= 1000 ? (value / 1000).toFixed(1) + "K" : String(value);
+    }
+    /** 屏保沿用任务页的游戏字体，系统字体回退确保旧手机可读。
+     * @param size 字号 @param bold 是否加粗 @return Canvas 字体声明
+     * @author Kai @date 2026/11/02 14:01 */
+    function monitorFont(size, bold = false) {
+        return (bold ? "700 " : "") + size + 'px "Cascadia Mono", "Consolas", "Microsoft YaHei UI", monospace';
+    }
+    /** 绘制横向额度余量条，突出当前可用比例，闲置仍保留历史读数。
+     * @param item 服务报告的额度窗口 @param label 窗口名称
+     * @param y 行起点 @param width 额度条宽度 @param stale 是否历史快照
+     * @author Kai @date 2026/11/02 13:59 */
+    function paintQuotaBar(item, label, y, width, stale, accent) {
+        const reset = !!(item && item.resets_at && Date.now() >= item.resets_at * 1000);
+        const known = !!(item && typeof item.remaining_percent === "number" && Number.isFinite(item.remaining_percent) && item.remaining_percent >= 0 && item.remaining_percent <= 100);
+        const valid = known;
+        const remaining = valid ? item.remaining_percent : null;
+        const color = valid && remaining < 20 ? "#dfa47d" : (accent || (label === "周额度" ? "#a79bdc" : "#78cdd2"));
+        const compact = width < 460;
+        brush.save(); brush.translate(-width / 2, y);
+        brush.textAlign = "left"; brush.font = monitorFont(compact ? 18 : 24, true); brush.fillStyle = "#bdcddd";
+        // 小菱形标记与任务页硬边风格一致，不增加持续闪烁。
+        brush.fillStyle = color; brush.fillRect(0, -13, 8, 8);
+        brush.fillStyle = "#d2caeb"; brush.fillText(label, 16, 0);
+        brush.textAlign = "right"; brush.font = monitorFont(compact ? 32 : 46, true); brush.fillStyle = color;
+        brush.fillText(valid ? remaining.toFixed(0) + "%" : "—", width, 1);
+        let detail = reset ? "上周期余量 · 等待新周期同步" : !known ? "暂无额度记录" : stale ? "上次剩余额度" : "剩余额度";
+        // 保持屏保自身的时间文案，与任务页紧凑格式独立。
+        if (valid && !reset && item.resets_at) {
+            const seconds = Math.max(0, item.resets_at - Date.now() / 1000);
+            const hours = Math.floor(seconds / 3600);
+            detail += " · " + (hours >= 24 ? Math.floor(hours / 24) + "天后重置" : hours + "小时" + Math.floor(seconds % 3600 / 60) + "分后重置");
+        }
+        brush.textAlign = "left"; brush.font = monitorFont(15); brush.fillStyle = "#8999ae";
+        brush.fillText(detail, 0, 23, width);
+        // 像素游戏的分格能量槽：硬边、短投影、顶部高光，避免大面积发亮。
+        // @author Kai @date 2026/11/02 14:01
+        brush.fillStyle = "#100d1b"; brush.fillRect(3, 39, width, 17);
+        brush.strokeStyle = "#635082"; brush.lineWidth = 2; brush.strokeRect(0, 34, width, 19);
+        const slots = 20, gap = 3, slotWidth = (width - 8 - gap * (slots - 1)) / slots;
+        const fillEnd = valid ? remaining / 100 * (width - 8) : 0;
+        for (let index = 0; index < slots; index++) {
+            const left = index * (slotWidth + gap);
+            brush.fillStyle = "#211a32"; brush.fillRect(4 + left, 38, slotWidth, 11);
+            const activeWidth = Math.max(0, Math.min(slotWidth, fillEnd - left));
+            if (activeWidth > 0) {
+                brush.fillStyle = color; brush.fillRect(4 + left, 38, activeWidth, 11);
+                brush.fillStyle = accent === "#c4b2ee" || label === "周额度" ? "#c4b2ee" : "#a2e0df";
+                brush.fillRect(4 + left, 38, activeWidth, 2);
+            }
+        }
+        brush.restore();
+    }
+    /** 绘制七天增量趋势；空心占位表示无记录，统计不补零。
+     * @param trend 七日快照 @param portrait 是否竖屏 @author Kai @date 2026/11/02 09:58 */
+    function paintUsageTrend(trend, portrait, layoutW, layoutH) {
+        const days = trend.days || [];
+        const width = layoutW * 0.94, top = layoutH * 0.12;
+        // 底部信息区保留 64px；日期与信息区之间另留 16px，禁止侵入。
+        // @author Kai @date 2026/11/02 14:04
+        const footerTop = layoutH / 2 - 64;
+        // 标题与汇总占独立区域，最高柱的数字也必须留在绘图区内。
+        // @author Kai @date 2026/11/02 14:03
+        const chartBottom = footerTop - 16 - top - 18;
+        const chartTop = portrait ? 58 : 36;
+        const chartHeight = Math.max(2, chartBottom - chartTop);
+        const max = Math.max(1, ...days.map(day => day.tokens || 0));
+        brush.save(); brush.translate(-width / 2, top);
+        brush.textAlign = "left"; brush.font = monitorFont(17); brush.fillStyle = "#a395bf";
+        brush.fillText("近 7 天" + (trend.partial ? "（部分记录）" : "用量趋势"), 0, 0);
+        brush.textAlign = "right";
+        brush.fillText("合计 " + usageNumber(trend.total) + "  记录日均 " + usageNumber(trend.daily_average), width, portrait ? 22 : 0, portrait ? width : width * 0.65);
+        const slot = width / 7;
+        days.forEach((day, index) => {
+            const x = slot * (index + 0.5), height = day.tokens === null ? 0 : Math.max(2, day.tokens / max * chartHeight);
+            brush.textAlign = "center"; brush.font = monitorFont(14);
+            if (day.tokens === null) {
+                brush.strokeStyle = "#384357"; brush.strokeRect(x - 9, chartBottom - 3, 18, 3);
+                brush.fillStyle = "#65768f"; brush.fillText("无记录", x, chartBottom - 11);
+            } else {
+                brush.fillStyle = index === 6 ? "#78cdd2" : "#8472ae";
+                brush.fillRect(x - 9, chartBottom - height, 18, height);
+                brush.fillStyle = index === 6 ? "#a2e0df" : "#b3a1d6";
+                brush.fillRect(x - 9, chartBottom - height, 18, Math.min(2, height));
+                brush.fillStyle = "#91a4be"; brush.fillText(usageNumber(day.tokens), x, chartBottom - 6 - height);
+            }
+            brush.fillStyle = "#7385a1"; brush.fillText(day.date.slice(5).replace("-", "/"), x, chartBottom + 18);
+        });
+        brush.textAlign = "center"; brush.font = monitorFont(14); brush.fillStyle = "#65768f";
+        // 日均口径通过标题说明，避免占用同屏趋势区域。
+        brush.restore();
+    }
+    /** 生成屏保考勤摘要，沿用助手时间，不推断最终考勤状态。
+     * @param attendance 当日考勤快照 @return 单行考勤文本
+     * @author Kai @date 2026/11/02 11:25 */
+    function saverAttendance(attendance) {
+        if (!attendance) return "考勤数据暂不可用";
+        if (attendance.workday === false) return "今天休息";
+        if (!attendance.ok) return "考勤数据暂不可用";
+        if (!attendance.in_time) return "尚无上班记录";
+        const clockIn = "上班 " + time(attendance.in_time);
+        if (!online) return "上次考勤 · " + clockIn + (attendance.target_time ? " · 可下班 " + time(attendance.target_time) : "");
+        const target = Date.parse(attendance.target_time);
+        if (!Number.isFinite(target)) return clockIn + " · 预计下班时间待确认";
+        const minutes = Math.ceil((target - Date.now()) / 60000);
+        if (minutes <= 0) return clockIn + " · 可以下班了";
+        // 复用业务配置的临近下班阈值；倒计时只在在线场景使用。
+        const threshold = Math.max(1, Number((attendance.display || {}).near_minutes) || 20);
+        return clockIn + " · " + (minutes <= threshold ? "还有 " + minutes + " 分钟可下班" : "预计可下班 " + time(attendance.target_time));
+    }
+    /** 屏保窗口名称：优先用服务给定标签，Codex 仍用 5 小时和周额度。
+     * @param item 额度窗口 @return 窗口名称 @author Kai @date 2026/11/20 09:32 */
+    function saverQuotaLabel(item) {
+        if (!item) return "额度";
+        if (item.label === "套餐额度") return "";
+        if (item.label) return item.label;
+        if (item.minutes === 300) return "5 小时额度";
+        if (item.minutes === 10080) return "周额度";
+        return quotaWindowName(item);
+    }
+    /** 格式化某个来源的额度更新年龄。
+     * @param source 用量快照 @return 来源加更新时间 @author Kai @date 2026/11/20 09:32 */
+    function quotaAge(source) {
+        const stamp = Date.parse(source && (source.limits_updated_at || source.updated_at));
+        const name = source && source.provider_name || "额度";
+        if (!Number.isFinite(stamp)) return name + " 未读取";
+        const age = Math.max(0, Math.floor((Date.now() - stamp) / 60000));
+        return name + " " + (age < 1 ? "刚刚" : age < 60 ? age + " 分钟前" : Math.floor(age / 60) + " 小时前");
+    }
+    /** 同一屏绘制 Codex 与 Cursor：横屏左右分栏，竖屏上下叠放。
+     * @param sources 用量来源 @param layoutW 布局宽度 @param layoutH 布局高度 @param portrait 是否竖屏
+     * @author Kai @date 2026/11/20 09:32 */
+    function paintSharedQuotas(sources, layoutW, layoutH, portrait) {
+        const board = sources.filter(source => source && source.provider_id);
+        const accents = {codex: "#78cdd2", cursor: "#c4b2ee"};
+        if (!board.length) {
+            brush.textAlign = "left"; brush.font = monitorFont(18); brush.fillStyle = "#7f90aa";
+            brush.fillText("未选择要监听的 AI", -layoutW * 0.47, -layoutH * 0.2);
+            return;
+        }
+        const gap = 28;
+        const width = board.length < 2 || portrait ? layoutW * 0.94 : (layoutW * 0.94 - gap) / board.length;
+        board.forEach((source, index) => {
+            const limits = Array.isArray(source.limits) ? source.limits : [];
+            const stamp = Date.parse(source.limits_updated_at || source.updated_at);
+            const stale = !Number.isFinite(stamp) || Date.now() - stamp > 15 * 60000;
+            const left = portrait ? -width / 2 : -layoutW * 0.47 + index * (width + gap);
+            const top = portrait ? -layoutH * 0.46 + index * 210 : -layoutH * 0.40;
+            brush.save(); brush.translate(left + width / 2, top);
+            const accent = accents[source.provider_id] || "#b1bbd4";
+            brush.textAlign = "left"; brush.font = monitorFont(portrait ? 16 : 19, true); brush.fillStyle = accent;
+            brush.fillText(source.provider_name || "额度", -width / 2, 0);
+            brush.textAlign = "right"; brush.font = monitorFont(13); brush.fillStyle = "#7f90aa";
+            brush.fillText(quotaAge(source), width / 2, 0);
+            brush.restore();
+            brush.save(); brush.translate(left + width / 2, 0);
+            const barLabel = (item) => source.provider_id === "cursor" && (!item || !item.label || item.label === "套餐额度") ? "" : saverQuotaLabel(item);
+            paintQuotaBar(limits[0], barLabel(limits[0]), top + 46, width, stale, accent);
+            if (limits[1]) paintQuotaBar(limits[1], barLabel(limits[1]), top + 124, width, stale, accent);
+            brush.restore();
+        });
+    }
+    /** 绘制漂浮 Token 仪表盘，纯黑底、所有文字随场景移动，保留事件切换动画。
+     * @param now 浏览器动画时钟 @author Kai @date 2026/11/02 09:54 */
+    // 限制到约 30 帧，避免旧手机持续高负载重绘。
+    let lastUsageFrame = -Infinity;
+    function paintOled(now) {
+        requestAnimationFrame(paintOled);
+        if (oled.hidden || document.hidden || now - lastUsageFrame < 33) return;
+        lastUsageFrame = now;
+        const w = Math.max(1, innerWidth), h = Math.max(1, innerHeight);
+        // 以物理像素绘制文字，最多 2 倍分辨率，兼顾旧手机清晰度和绘制开销。
+        // @author Kai @date 2026/11/02 10:08
+        const ratio = Math.min(2, window.devicePixelRatio || 1);
+        const pixelW = Math.round(w * ratio), pixelH = Math.round(h * ratio);
+        if (oled.width !== pixelW || oled.height !== pixelH) { oled.width = pixelW; oled.height = pixelH; }
+        brush.setTransform(ratio, 0, 0, ratio, 0, 0);
+        brush.fillStyle = "#000000"; brush.fillRect(0, 0, w, h);
+        if (oled.dataset.quiet === "yes") return;
+        const t = now / 1000, portrait = h > w;
+        // 布局占满可视高度、使用 90% 屏宽；只调整元素间距，不拉伸字体和额度条。
+        // @author Kai @date 2026/11/02 10:16
+        // 上下各留约 5% 空间，纵向换位不会把底部文字移出屏幕。
+        // @author Kai @date 2026/11/02 14:48
+        const scale = Math.min(w * 0.90 / (portrait ? 340 : 700), h * 0.90 / (portrait ? 620 : 420));
+        const layoutW = w * 0.90 / scale, layoutH = h * 0.90 / scale;
+        // 每 45 秒在三秒内平滑横纵换位，其他时间保持静止。
+        const step = Math.floor(t / 45), progress = Math.min(1, (t % 45) / 3);
+        const ease = progress * progress * (3 - 2 * progress);
+        const previousX = Math.sin((step - 1) * 2.4), nextX = Math.sin(step * 2.4);
+        const dx = (previousX + (nextX - previousX) * ease) * w * 0.015;
+        const previousY = Math.sin((step - 1) * 1.7), nextY = Math.sin(step * 1.7);
+        const dy = (previousY + (nextY - previousY) * ease) * h * 0.015;
+        brush.save(); brush.translate(w / 2 + dx, h / 2 + dy); brush.scale(scale, scale);
+        const usage = data && data.usage || {};
+        // Codex 与 Cursor 同时留在这一屏，横屏分左右，竖屏上下叠放。
+        // @author Kai @date 2026/11/20 09:32
+        const sources = data && Array.isArray(data.usages) && data.usages.length ? data.usages : [usage];
+        paintSharedQuotas(sources, layoutW, layoutH, portrait);
+        if (!portrait && usage.trend && Array.isArray(usage.trend.days) && usage.trend.days.length) paintUsageTrend(usage.trend, portrait, layoutW, layoutH);
+        brush.font = monitorFont(14); brush.fillStyle = "#687d94";
+        const updated = (online ? "" : "离线缓存 · ") + sources.map(quotaAge).join("  ·  ");
+        // 底部独立双行信息区，共用左侧对齐线；不继承趋势图的文字对齐状态。
+        // @author Kai @date 2026/11/02 14:04
+        const footerLeft = -layoutW * 0.47, footerTop = layoutH / 2 - 64;
+        brush.textAlign = "left"; brush.textBaseline = "alphabetic";
+        brush.strokeStyle = "#352d47"; brush.lineWidth = 1;
+        brush.beginPath(); brush.moveTo(footerLeft, footerTop); brush.lineTo(-footerLeft, footerTop); brush.stroke();
+        brush.fillText(updated, footerLeft, footerTop + 24, layoutW * 0.94);
+        // 考勤摘要与整个屏保共享位移，不增加固定发光元素。
+        brush.font = monitorFont(18); brush.fillStyle = "#a0c8c4";
+        brush.fillText(saverAttendance(data && data.attendance), footerLeft, footerTop + 50, layoutW * 0.94);
+
+        brush.restore();
+    }
+    requestAnimationFrame(paintOled);
+    // 连接自动恢复，手机界面不依赖 Fullscreen API。
+    el("connect").onclick = () => { token = el("token").value.trim(); localStorage.setItem("desk-hub-token", token); connect(); };
+    el("logout").onclick = () => { ++connectVersion; clearTimeout(retry); if (socket) { socket.onclose = null; socket.close(); } token = ""; localStorage.removeItem("desk-hub-token"); el("login").hidden = false; connection(false); };
+    // 不依赖 socket.close 回调触发重试，防止手机休眠后永远卡在离线缓存。
+    setInterval(() => {
+        if (token && !document.hidden && el("login").hidden && Date.now() - lastMessage > 12000 && Date.now() - lastConnectAttempt > 12000) {
+            connection(false); connect();
+        }
+        tick();
+    }, 1000);
+    if (data) { render(data); connection(false); } if (token) connect(); tick();
+</script>
+</html>
